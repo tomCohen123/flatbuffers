@@ -127,17 +127,12 @@ flatc(
         "--dart",
         "--go",
         "--lobster",
+        "--lua",
         "--php",
     ],
     schema="monster_test.fbs",
     include="include_test",
     data="monsterdata_test.json",
-)
-
-flatc(
-    ["--lua", "--bfbs-filenames", str(tests_path)],
-    schema="monster_test.fbs",
-    include="include_test"    
 )
 
 flatc(
@@ -388,6 +383,13 @@ flatc(
     BINARY_OPTS + ["--bfbs-filenames", str(samples_path)],
     schema=samples_schema,
     cwd=samples_path,
+)
+
+flatc(
+    options = ["--java", "--gen-object-api"], 
+    schema="java_annotations_test.fbs", 
+    prefix="java_annotations_test", 
+    include="include_test"
 )
 
 # Reflection

@@ -24,6 +24,8 @@
 #include "flatbuffers/idl.h"
 #include "flatbuffers/util.h"
 
+
+
 namespace flatbuffers {
 
 // Reflects the version at the compiling time of binary(lib/dll/so).
@@ -1734,6 +1736,8 @@ CheckedError Parser::ParseMetaData(SymbolTable<Value> *attributes) {
   return NoError();
 }
 
+
+
 CheckedError Parser::ParseEnumFromString(const Type &type,
                                          std::string *result) {
   const auto base_type =
@@ -3419,14 +3423,43 @@ CheckedError Parser::DoParse(const char *source, const char **include_paths,
       return Error("includes must come before declarations");
     } else if (IsIdent("attribute")) {
       NEXT();
-      auto name = attribute_;
+      auto outer_attribute_name = attribute_;
       if (Is(kTokenIdentifier)) {
         NEXT();
       } else {
         EXPECT(kTokenStringConstant);
       }
+
+
+
+      if (Is('(')) {
+      NEXT();
+      for (;;) {
+        auto name = attribute_;
+        if (false == (Is(kTokenIdentifier) || Is(kTokenStringConstant)))
+          return Error("attribute name must be either identifier or string: " +
+                        name);
+        if (known_attributes_.find(name) == known_attributes_.end())
+          return Error("only predefined attributes can be used as inner attributes of attributes:" + 
+                        name);
+        NEXT();
+        if (Is(':')) {
+          NEXT();
+          if(name == "java_package")
+            attribute_to_its_specific_java_package_[outer_attribute_name] = attribute_;
+          NEXT();       
+        }
+        if (Is(')')) {
+          NEXT();
+          break;
+        }
+        EXPECT(',');
+      }
+      }
+
+
       EXPECT(';');
-      known_attributes_[name] = false;
+      known_attributes_[outer_attribute_name] = false;
     } else if (IsIdent("rpc_service")) {
       ECHECK(ParseService(source_filename));
     } else {
@@ -3669,7 +3702,7 @@ Offset<reflection::Field> FieldDef::Serialize(FlatBufferBuilder *builder,
       IsInteger(value.type.base_type) ? StringToInt(value.constant.c_str()) : 0,
       // result may be platform-dependent if underlying is float (not double)
       IsFloat(value.type.base_type) ? d : 0.0, deprecated, IsRequired(), key,
-      attr__, docs__, IsOptional(), static_cast<uint16_t>(padding));
+      attr__, docs__, IsOptional());
   // TODO: value.constant is almost always "0", we could save quite a bit of
   // space by sharing it. Same for common values of value.type.
 }
@@ -3685,7 +3718,6 @@ bool FieldDef::Deserialize(Parser &parser, const reflection::Field *field) {
     value.constant = FloatToString(field->default_real(), 16);
   }
   presence = FieldDef::MakeFieldPresence(field->optional(), field->required());
-  padding = field->padding();
   key = field->key();
   if (!DeserializeAttributes(parser, field->attributes())) return false;
   // TODO: this should probably be handled by a separate attribute
@@ -3829,8 +3861,7 @@ Offset<reflection::Type> Type::Serialize(FlatBufferBuilder *builder) const {
       *builder, static_cast<reflection::BaseType>(base_type),
       static_cast<reflection::BaseType>(element),
       struct_def ? struct_def->index : (enum_def ? enum_def->index : -1),
-      fixed_length, static_cast<uint32_t>(SizeOf(base_type)),
-      static_cast<uint32_t>(SizeOf(element)));
+      fixed_length);
 }
 
 bool Type::Deserialize(const Parser &parser, const reflection::Type *type) {

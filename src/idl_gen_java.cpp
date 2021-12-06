@@ -19,7 +19,8 @@
 #include "flatbuffers/code_generators.h"
 #include "flatbuffers/flatbuffers.h"
 #include "flatbuffers/idl.h"
-#include "flatbuffers/util.h"
+#include <set>
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    #include "flatbuffers/util.h"
 
 namespace flatbuffers {
 namespace java {
@@ -34,6 +35,42 @@ static CommentConfig comment_config = {
   " */",
 };
 
+static void SplitStringByDelimeterIntoVec(std::string& s, char delimeter, std::vector<std::string>&  v){
+  int len = s.length();
+  std::string word ="";
+  for(int i =0; i<len; i++){
+    if(s[i]==delimeter){
+      v.push_back(word);
+      word = "";
+      continue; 
+    }
+    word += s[i];
+  }
+  v.push_back(word);
+}
+
+static void AddAnnotationsAboveObjectOrAboveObjectsFields(const Parser &parser_, Definition& object, std::string& code,
+                                                        std::set<std::string>& attributes_packages, bool is_field_annotation=false){
+  for (auto attr_it=object.attributes.dict.begin(); attr_it != object.attributes.dict.end(); ++attr_it) {
+        auto attr = attr_it->first;
+        auto &attr_value = *attr_it->second;
+        auto found_attr = parser_.known_attributes_.find(attr);
+        if (found_attr != parser_.known_attributes_.end() && !found_attr->second) {
+          auto java_package_it = parser_.attribute_to_its_specific_java_package_.find(attr);
+          if (java_package_it != parser_.attribute_to_its_specific_java_package_.end()){
+            if(is_field_annotation){
+              code += " ";
+            }
+            code += "@" + MakeCamel(attr, true);
+            if ("0" != attr_value.constant) {
+              code += "(\"" + attr_value.constant + "\")";
+            }
+            code += "\n";
+            attributes_packages.insert((java_package_it->second)+"."+java_package_it->first);
+          }
+        }
+      }
+}
 class JavaGenerator : public BaseGenerator {
   struct FieldArrayLength {
     std::string name;
@@ -47,9 +84,36 @@ class JavaGenerator : public BaseGenerator {
         cur_name_space_(nullptr) {}
 
   JavaGenerator &operator=(const JavaGenerator &);
+
   bool generate() {
     std::string one_file_code;
     cur_name_space_ = parser_.current_namespace_;
+    if (parser_.opts.generate_object_based_api) {
+      for (auto it = parser_.known_attributes_.begin(); it != parser_.known_attributes_.end(); ++it) {
+        if (!it->second && 
+            parser_.attribute_to_its_specific_java_package_.find(it->first) != 
+            parser_.attribute_to_its_specific_java_package_.end()){
+          Namespace *attributes_name_space_ = new Namespace(); 
+          std::string attrcode;
+          std::string attr_name = it->first;
+          GenAttribute_ObjectAPI(&attr_name, &attrcode);
+          if (parser_.opts.one_file) {
+            one_file_code += attrcode;
+          } 
+          else {
+            std::string s = parser_.attribute_to_its_specific_java_package_.at(attr_name);
+            SplitStringByDelimeterIntoVec(s, '.', attributes_name_space_->components);
+            if (!SaveType(MakeCamel(attr_name, true), *attributes_name_space_, attrcode,
+                          /* needs_includes= */ false)){
+                            delete attributes_name_space_;
+                            return false;
+                          }
+          }
+        delete attributes_name_space_;
+        }
+      }
+      
+    }
 
     for (auto it = parser_.enums_.vec.begin(); it != parser_.enums_.vec.end();
          ++it) {
@@ -67,13 +131,14 @@ class JavaGenerator : public BaseGenerator {
 
       if (parser_.opts.generate_object_based_api && enum_def.is_union) {
         enumcode = "";
-        GenEnum_ObjectAPI(enum_def, &enumcode, parser_.opts);
+        std::set <std::string> attributes_packages;
+        GenEnum_ObjectAPI(enum_def, &enumcode, parser_.opts, attributes_packages);
         auto class_name = enum_def.name + "Union";
         if (parser_.opts.one_file) {
           one_file_code += enumcode;
         } else {
           if (!SaveType(class_name, *enum_def.defined_namespace, enumcode,
-                        /* needs_includes= */ false))
+                        /* needs_includes= */ false, &attributes_packages))
             return false;
         }
       }
@@ -96,13 +161,14 @@ class JavaGenerator : public BaseGenerator {
 
       if (parser_.opts.generate_object_based_api) {
         declcode = "";
-        GenStruct_ObjectAPI(struct_def, &declcode, parser_.opts);
+        std::set <std::string> attributes_packages;
+        GenStruct_ObjectAPI(struct_def, &declcode, parser_.opts,  attributes_packages);
         auto class_name = GenTypeName_ObjectAPI(struct_def.name, parser_.opts);
         if (parser_.opts.one_file) {
           one_file_code += declcode;
         } else {
           if (!SaveType(class_name, *struct_def.defined_namespace, declcode,
-                        /* needs_includes= */ true))
+                        /* needs_includes= */ true, &attributes_packages))
             return false;
         }
       }
@@ -118,7 +184,7 @@ class JavaGenerator : public BaseGenerator {
   // Save out the generated code for a single class while adding
   // declaration boilerplate.
   bool SaveType(const std::string &defname, const Namespace &ns,
-                const std::string &classcode, bool needs_includes) const {
+                const std::string &classcode, bool needs_includes, std::set<std::string>* p_attributes_packages= nullptr) const {
     if (!classcode.length()) return true;
 
     std::string code;
@@ -129,7 +195,18 @@ class JavaGenerator : public BaseGenerator {
       code += "package " + namespace_name + ";";
       code += "\n\n";
     }
-    if (needs_includes) {
+    if(p_attributes_packages){
+        std::set<std::string> attributes_packages = *p_attributes_packages; 
+        for(std::string s : attributes_packages){
+          code+="import ";
+          code+=s+";";
+          code+="\n";      
+        }
+        if(!needs_includes){
+            code+="\n";
+        }
+      }
+    if (needs_includes){
       code +=
           "import java.nio.*;\nimport java.lang.*;\nimport "
           "java.util.*;\nimport com.google.flatbuffers.*;\n";
@@ -138,10 +215,9 @@ class JavaGenerator : public BaseGenerator {
       }
       if (parser_.opts.java_checkerframework) {
         code += "\nimport org.checkerframework.dataflow.qual.Pure;\n";
-      }
+      } 
       code += "\n";
     }
-
     code += classcode;
     if (!namespace_name.empty()) code += "";
     auto filename = NamespaceDir(ns) + defname + ".java";
@@ -1277,10 +1353,12 @@ class JavaGenerator : public BaseGenerator {
   }
 
   void GenEnum_ObjectAPI(EnumDef &enum_def, std::string *code_ptr,
-                         const IDLOptions &opts) const {
+                         const IDLOptions &opts, std::set<std::string>& attributes_packages) const {
     auto &code = *code_ptr;
     if (enum_def.generated) return;
     code += "import com.google.flatbuffers.FlatBufferBuilder;\n\n";
+
+    AddAnnotationsAboveObjectOrAboveObjectsFields(parser_, enum_def, code, attributes_packages);
 
     if (!enum_def.attributes.Lookup("private")) { code += "public "; }
     auto union_name = enum_def.name + "Union";
@@ -2023,9 +2101,12 @@ class JavaGenerator : public BaseGenerator {
   }
 
   void GenStruct_ObjectAPI(StructDef &struct_def, std::string *code_ptr,
-                           const IDLOptions &opts) const {
+                           const IDLOptions &opts, std::set<std::string>& attributes_packages) const {
     if (struct_def.generated) return;
     auto &code = *code_ptr;
+    
+    AddAnnotationsAboveObjectOrAboveObjectsFields(parser_, struct_def, code, attributes_packages);
+
     if (struct_def.attributes.Lookup("private")) {
       // For Java, we leave the enum unmarked to indicate package-private
     } else {
@@ -2047,6 +2128,9 @@ class JavaGenerator : public BaseGenerator {
       if (field.IsScalarOptional())
         type_name = ConvertPrimitiveTypeToObjectWrapper_ObjectAPI(type_name);
       auto camel_name = MakeCamel(field.name, false);
+      
+      AddAnnotationsAboveObjectOrAboveObjectsFields(parser_, field, code, attributes_packages, true);
+
       code += "  private " + type_name + " " + camel_name + ";\n";
     }
     // Generate Java getters and setters
@@ -2130,6 +2214,12 @@ class JavaGenerator : public BaseGenerator {
       code += "  }\n";
     }
     code += "}\n\n";
+  }
+  void GenAttribute_ObjectAPI(std::string *attr_name, std::string *code_ptr) const {
+        auto &code = *code_ptr;
+        code += "public @interface " + MakeCamel(*attr_name, true) + " {\n";
+        code += "  String value() default \"\";\n";
+        code += "}";
   }
 
   // This tracks the current namespace used to determine if a type need to be
