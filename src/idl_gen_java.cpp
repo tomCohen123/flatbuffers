@@ -66,7 +66,7 @@ static void AddAnnotationsAboveObjectOrAboveObjectsFields(const Parser &parser_,
               code += "(\"" + attr_value.constant + "\")";
             }
             code += "\n";
-            attributes_packages.insert((java_package_it->second)+"."+java_package_it->first);
+            attributes_packages.insert((java_package_it->second)+"."+MakeCamel(java_package_it->first,true));
           }
         }
       }
@@ -104,7 +104,7 @@ class JavaGenerator : public BaseGenerator {
             std::string s = parser_.attribute_to_its_specific_java_package_.at(attr_name);
             SplitStringByDelimeterIntoVec(s, '.', attributes_name_space_->components);
             if (!SaveType(MakeCamel(attr_name, true), *attributes_name_space_, attrcode,
-                          /* needs_includes= */ false)){
+                          /* needs_includes= */ false, /*p_attributes_packages= */ nullptr, /*is_annotation_file= */true)){
                             delete attributes_name_space_;
                             return false;
                           }
@@ -184,7 +184,7 @@ class JavaGenerator : public BaseGenerator {
   // Save out the generated code for a single class while adding
   // declaration boilerplate.
   bool SaveType(const std::string &defname, const Namespace &ns,
-                const std::string &classcode, bool needs_includes, std::set<std::string>* p_attributes_packages= nullptr) const {
+                const std::string &classcode, bool needs_includes, std::set<std::string>* p_attributes_packages= nullptr, bool is_annnotation_file=false) const {
     if (!classcode.length()) return true;
 
     std::string code;
@@ -194,6 +194,12 @@ class JavaGenerator : public BaseGenerator {
     if (!namespace_name.empty()) {
       code += "package " + namespace_name + ";";
       code += "\n\n";
+    }
+    if(is_annnotation_file){
+      code+="import java.lang.annotation.Retention;\n";
+      code+="import java.lang.annotation.RetentionPolicy;\n";
+      code+="\n";
+      code+="@Retention(RetentionPolicy.RUNTIME)\n";
     }
     if(p_attributes_packages){
         std::set<std::string> attributes_packages = *p_attributes_packages; 
