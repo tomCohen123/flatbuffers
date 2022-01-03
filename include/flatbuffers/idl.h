@@ -36,7 +36,7 @@
 #if !defined(FLATBUFFERS_MAX_PARSING_DEPTH)
 #  define FLATBUFFERS_MAX_PARSING_DEPTH 64
 #endif
-
+  
 namespace flatbuffers {
 
 // The order of these matters for Is*() functions below.
@@ -819,6 +819,7 @@ class Parser : public ParserState {
     known_attributes_["native_default"] = true;
     known_attributes_["flexbuffer"] = true;
     known_attributes_["private"] = true;
+    known_attributes_["java_package"] = true; 
   }
 
   ~Parser() {
@@ -1016,6 +1017,7 @@ class Parser : public ParserState {
   std::vector<std::string> native_included_files_;
 
   std::map<std::string, bool> known_attributes_;
+  std::map<std::string, std::string> attribute_to_its_specific_java_package_;
 
   IDLOptions opts;
   bool uses_flexbuffers_;
